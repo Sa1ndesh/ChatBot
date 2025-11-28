@@ -203,10 +203,14 @@ class ChatWindow(tk.Tk):
                         if action == RESP_SUCCESS:
                             if 'rooms' in message:
                                 print(f"[CHAT] Received {len(message['rooms'])} rooms from server")
-                                # Update rooms on main thread
-                                self.after(0, lambda: self.room_panel.update_rooms(message['rooms']))
+                                # Update rooms on main thread - capture in closure
+                                rooms_list = message['rooms']
+                                self.after(0, lambda r=rooms_list: self.room_panel.update_rooms(r))
                             elif 'messages' in message:
-                                self.after(0, lambda: self.display_history(message['messages']))
+                                print(f"[CHAT] Received {len(message['messages'])} history messages")
+                                # Need to capture messages in closure
+                                msgs = message['messages']
+                                self.after(0, lambda m=msgs: self.display_history(m))
                         
                         elif action == RESP_MESSAGE:
                             self.after(0, lambda m=message: self.display_message(m))
@@ -275,8 +279,35 @@ class ChatWindow(tk.Tk):
     
     def display_history(self, messages):
         """Display message history."""
+        print(f"[CHAT] Displaying {len(messages)} history messages")
         for msg in messages:
+            print(f"[CHAT] History message from {msg.get('username')}: {msg.get('content')[:50] if msg.get('content') else 'No content'}...")
             self.display_message(msg, is_history=True)
+    
+    def display_own_message(self, content, message_type='text', file_path=None):
+        """
+        Display your own message immediately (before server echo).
+        
+        Args:
+            content: Message content (plain text, not encrypted)
+            message_type: Type of message (text/image)
+            file_path: Path to file if applicable
+        """
+        time_str = datetime.now().strftime("%H:%M")
+        
+        # Format message
+        if message_type == 'text':
+            msg_text = f"[{time_str}] {self.user.username}: {content}\n"
+        elif message_type == 'image':
+            msg_text = f"[{time_str}] {self.user.username}: [Image: {file_path}]\n"
+        else:
+            msg_text = f"[{time_str}] {self.user.username}: {content}\n"
+        
+        # Display message
+        self.message_display.config(state=tk.NORMAL)
+        self.message_display.insert(tk.END, msg_text)
+        self.message_display.config(state=tk.DISABLED)
+        self.message_display.see(tk.END)
     
     def display_message(self, message, is_history=False):
         """
@@ -290,6 +321,10 @@ class ChatWindow(tk.Tk):
         encrypted_content = message.get('content')
         message_type = message.get('message_type', 'text')
         timestamp = message.get('timestamp', datetime.now().isoformat())
+        
+        # Skip if this is our own message (already displayed)
+        if username == self.user.username and not is_history:
+            return
         
         # Decrypt content
         content = self.encryption.decrypt(encrypted_content) if encrypted_content else ''
@@ -358,6 +393,11 @@ class ChatWindow(tk.Tk):
         
         try:
             self.socket.send((json.dumps(msg) + '\n').encode('utf-8'))
+            
+            # Display message immediately in your own window
+            self.display_own_message(content, 'text')
+            
+            # Clear input
             self.message_entry.delete(1.0, tk.END)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to send message: {e}")
@@ -389,6 +429,9 @@ class ChatWindow(tk.Tk):
             
             try:
                 self.socket.send((json.dumps(msg) + '\n').encode('utf-8'))
+                
+                # Display file message immediately
+                self.display_own_message(f"Shared image: {filename}", 'image', filename)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to send file: {e}")
     
